@@ -7,6 +7,7 @@ import {
   TextInput,
   Platform,
   Alert,
+  ActivityIndicator
 } from 'react-native';
 import {useNavigation, useRoute, RouteProp} from '@react-navigation/native';
 import {Linking} from 'react-native';
@@ -16,7 +17,7 @@ import {AuthStackParamList} from '../../navigation/AuthNavigator';
 import {useSelector, useDispatch} from 'react-redux';
 import {RootState, AppDispatch} from '../../redux/store';
 import {setOtp} from '../../redux/actions/authActions';
-
+import {setAuthLoading} from '../../redux/actions/authActions';
 type OTPScreenNavigationProp = NativeStackNavigationProp<
   AuthStackParamList,
   'Otp'
@@ -26,9 +27,11 @@ type OTPScreenRouteProp = RouteProp<AuthStackParamList, 'Otp'>;
 const OTPScreen = () => {
   const dispatch = useDispatch<AppDispatch>();
   const phone = useSelector((state: RootState) => state.auth.phone);
+  const isLoading = useSelector((state: RootState) => state.auth.isLoading);
+
   const navigation = useNavigation<OTPScreenNavigationProp>();
   const route = useRoute<OTPScreenRouteProp>();
-  const {method} = route.params;
+  const {method, confirmation} = route.params;
 
   const [otp, setOtpInput] = useState<string>('');
 
@@ -39,14 +42,20 @@ const OTPScreen = () => {
     dispatch(setOtp(text));
 
     if (text.length === 6) {
+      dispatch(setAuthLoading(true));
+
       try {
+        const credential = await confirmation.confirm(text);
+        console.log('✅ OTP verified:', credential?.user.uid);
         navigation.navigate('Role');
       } catch (error) {
-        console.error('❌ Invalid OTP:', error);
+        console.error('❌ OTP verification failed:', error);
         Alert.alert(
           'Invalid Code',
           'The verification code is incorrect or expired.',
         );
+      } finally {
+        dispatch(setAuthLoading(false));
       }
     }
   };
@@ -75,40 +84,46 @@ const OTPScreen = () => {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={handleGoBack} style={styles.goBackButton}>
-        <Text style={styles.goBackText}>{'<'}</Text>
-      </TouchableOpacity>
+      {isLoading ? (
+        <ActivityIndicator size="large" color="#0000ff" />
+      ) : (
+        <>
+          <TouchableOpacity onPress={handleGoBack} style={styles.goBackButton}>
+            <Text style={styles.goBackText}>{'<'}</Text>
+          </TouchableOpacity>
 
-      <View style={styles.textContainer}>
-        <Text style={styles.title}>Enter the code</Text>
-        <Text style={styles.subText}>
-          We have sent you a verification code to {phone}
-        </Text>
-      </View>
+          <View style={styles.textContainer}>
+            <Text style={styles.title}>Enter the code</Text>
+            <Text style={styles.subText}>
+              We have sent you a verification code to {phone}
+            </Text>
+          </View>
 
-      <TextInput
-        style={styles.otpInput}
-        value={otp}
-        onChangeText={handleOtpChange}
-        maxLength={6}
-        keyboardType="number-pad"
-        placeholder="Enter OTP"
-        secureTextEntry={false}
-        autoFocus
-      />
+          <TextInput
+            style={styles.otpInput}
+            value={otp}
+            onChangeText={handleOtpChange}
+            maxLength={6}
+            keyboardType="number-pad"
+            placeholder="Enter OTP"
+            secureTextEntry={false}
+            autoFocus
+          />
 
-      <TouchableOpacity onPress={handleResendCode}>
-        <Text style={styles.resendText}>Resend code</Text>
-      </TouchableOpacity>
+          <TouchableOpacity onPress={handleResendCode}>
+            <Text style={styles.resendText}>Resend code</Text>
+          </TouchableOpacity>
 
-      <Button
-        title={`Open ${method}`}
-        onPress={handleOpenCommunicationApp}
-        backgroundColor="#E4E4E4"
-        textColor="white"
-        style={styles.button}
-        textStyle={styles.customButtonText}
-      />
+          <Button
+            title={`Open ${method}`}
+            onPress={handleOpenCommunicationApp}
+            backgroundColor="#E4E4E4"
+            textColor="white"
+            style={styles.button}
+            textStyle={styles.customButtonText}
+          />
+        </>
+      )}
     </View>
   );
 };

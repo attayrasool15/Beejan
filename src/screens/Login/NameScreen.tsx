@@ -1,20 +1,27 @@
-import React, {useState} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   StyleSheet,
   Text,
   View,
   TextInput,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useSelector, useDispatch} from 'react-redux';
 import {AuthStackParamList} from '../../navigation/AuthNavigator';
-import {RootState} from '../../redux/store';
-import {setName} from '../../redux/actions/authActions';
+import {
+  setName,
+  setAuthLoading,
+  setLoggedIn,
+} from '../../redux/actions/authActions';
 import Button from '../../components/Button';
-import {AppDispatch} from '../../redux/store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import auth from '@react-native-firebase/auth';
+import {createOrUpdateUser} from '../../services/realTimeUserService';
+import {AppDispatch, RootState} from '../../redux/store';
+import LoaderScreen from '../../components/LoaderScreen';
 
 type NameScreenNavigationProp = NativeStackNavigationProp<
   AuthStackParamList,
@@ -25,23 +32,37 @@ const NameScreen = () => {
   const [name, setNameInput] = useState('');
   const navigation = useNavigation<NameScreenNavigationProp>();
   const dispatch = useDispatch<AppDispatch>();
+
+  const phone = useSelector((state: RootState) => state.auth.phone);
   const role = useSelector((state: RootState) => state.auth.role);
-  console.log('Saved Role to Redux:', role);
+  const isLoading = useSelector((state: RootState) => state.auth.isLoading);
 
   const handleGoBack = () => {
     navigation.goBack();
   };
 
+  useEffect(() => {
+    const unsubscribe = auth().onAuthStateChanged(user => {
+      console.log('👤 Auth state restored:', user?.uid);
+    });
+    return unsubscribe;
+  }, []);
+
   const handlePress = async () => {
     try {
-      console.log('Next Button Pressed');
-      dispatch(setName(name));
-      console.log('Saved name to Redux:', name);
-
-      if (!role) {
-        console.warn('❌ Role is null, not saving session.');
+      if (!name.trim()) {
+        Alert.alert('Validation', 'Please enter your name.');
         return;
       }
+
+      if (!role || !phone) {
+        console.warn('❌ Missing role or phone in Redux');
+        Alert.alert('Error', 'Missing required user info (role/phone).');
+        return;
+      }
+
+      dispatch(setAuthLoading(true));
+      dispatch(setName(name));
 
       await AsyncStorage.multiSet([
         ['@name', name],
@@ -49,18 +70,45 @@ const NameScreen = () => {
         ['@isLoggedIn', 'true'],
       ]);
 
-      // 🔀 Navigate
-      if (role === 'driver') {
-        navigation.navigate('DriverPersonalInfo');
-      } else if (role === 'passenger') {
-        navigation.navigate('Location');
-      } else {
-        console.warn('No valid role set in Redux');
-      }
-    } catch (error) {
-      console.error('❌ Failed to save session:', error);
+      dispatch(setLoggedIn(true)); // ✅ Ensure Redux updates immediately
+
+      const unsubscribe = auth().onAuthStateChanged(async user => {
+        if (!user) {
+          console.warn('❌ Firebase Auth user is still null');
+          Alert.alert('Error', 'Authentication session is not ready yet.');
+          dispatch(setAuthLoading(false));
+          unsubscribe();
+          return;
+        }
+
+        await createOrUpdateUser({
+          uid: user.uid,
+          name,
+          phone,
+          role,
+          createdAt: new Date().toISOString(),
+        });
+
+        console.log('✅ User registered in Realtime Database');
+        unsubscribe();
+
+        dispatch(setAuthLoading(false));
+        if (role === 'passenger') {
+          navigation.navigate('HomeMapScreen');
+          // navigation.navigate('Location'); // only navigate if passenger
+        }
+        // if driver, RootNavigator will automatically render DriverStack
+      });
+    } catch (error: any) {
+      console.error('❌ Failed to register user or navigate:', error);
+      dispatch(setAuthLoading(false));
+      Alert.alert('Error', 'Something went wrong while saving your profile.');
     }
   };
+
+  if (isLoading) {
+    return <LoaderScreen />;
+  }
 
   return (
     <View style={styles.container}>
